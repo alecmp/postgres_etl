@@ -1,0 +1,15 @@
+version: 1
+disable_existing_loggers: False
+handlers:
+  file:
+    class: logging.FileHandler
+    filename: logs/etl.log
+    level: DEBUG
+    formatter: detailed
+formatters:
+  detailed:
+    format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+loggers:
+  root:
+    level: DEBUG
+    handlers: [file]

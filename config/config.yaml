@@ -1,0 +1,26 @@
+db:
+  host: localhost
+  port: 5432
+  dbname: your_db
+  user: user
+  password: password
+# Configurazione delle API (esempio per Eurostat e World Bank)
+
+world_bank:
+  base_url: "https://api.worldbank.org/v2"
+  default_format: "json"
+  default_page_size: 100
+  retry_attempts: 3
+  retry_backoff_factor: 0.3
+  timeout: 10
+  logging:
+    level: "INFO"
+    format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+# Configurazione per il logging
+logging:
+  level: INFO
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  handlers:
+    - type: file
+      filename: "logs/etl_process.log"
