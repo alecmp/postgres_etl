@@ -1,5 +1,5 @@
 import unittest
-from src.etl.extract import extract_data
+from src.etl.WorldBankExtractor import extract_data
 
 class TestExtract(unittest.TestCase):
     def test_extract(self):

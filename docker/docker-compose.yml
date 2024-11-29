@@ -13,3 +13,17 @@ services:
       - postgres_data:/var/lib/postgresql/data
 volumes:
   postgres_data:
+
+
+ jupyter:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/app
+    ports:
+      - "8888:8888"
+    depends_on:
+      - postgres
+    environment:
+      - DATABASE_URL=postgresql://etl_user:etl_password@postgres:5432/economic_data

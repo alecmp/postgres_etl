@@ -1,98 +1,143 @@
-import logging
+import os
+from dotenv import load_dotenv
+import pandas as pd
+import plotly.express as px
 from pathlib import Path
 from typing import Dict, Any
-from src.etl.WorldBankExtractor import WorldBankExtractor
-from src.etl.WorldBankTransformer import WorldBankTransformer, TransformerConfig
-from src.etl.WorldBankLoader import WorldBankLoader, LoaderConfig
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+from world_bank_extractor import WorldBankExtractor
+from world_bank_transformer import WorldBankTransformer, TransformerConfig
+from world_bank_loader import WorldBankLoader, LoaderConfig
+from imf_extractor import IMFExtractor
 
-def run_etl_pipeline(
+def run_combined_etl(
     country: str,
-    indicator: str,
     start_year: int,
     end_year: int,
     db_config: Dict[str, Any]
 ) -> Dict[str, Any]:
-    """
-    Run the complete ETL pipeline.
+    """Run ETL pipeline for both World Bank and IMF data."""
     
-    Args:
-        country: Country code
-        indicator: World Bank indicator code
-        start_year: Start year for data
-        end_year: End year for data
-        db_config: Database configuration dictionary
-        
-    Returns:
-        Dictionary containing pipeline execution statistics
-    """
-    try:
+    # World Bank indicators
+    wb_indicators = {
+        'NY.GDP.MKTP.KD.ZG': 'GDP growth (annual %)',
+        'SL.UEM.TOTL.ZS': 'Unemployment, total (% of labor force)'
+    }
+    
+    # IMF Financial Soundness Indicators
+    imf_indicators = [
+        'FSANL_PT', # Bank Regulatory Capital to Risk-Weighted Assets
+        'FSANL_NL', # Bank Nonperforming Loans to Total Loans
+        'FSANL_CA'  # Bank Return on Assets
+    ]
+    
+    results = {}
+    
+    # Extract and load World Bank data
+    wb_extractor = WorldBankExtractor()
+    wb_transformer = WorldBankTransformer()
+    wb_loader = WorldBankLoader(LoaderConfig(**db_config))
+    
+    for indicator_code, indicator_name in wb_indicators.items():
         # Extract
-        extractor = WorldBankExtractor()
-        extract_result = extractor.extract_data(
+        wb_data = wb_extractor.extract_data(
             country=country,
-            indicator=indicator,
+            indicator=indicator_code,
             start_year=start_year,
             end_year=end_year
         )
         
         # Transform
-        transformer = WorldBankTransformer(
-            config=TransformerConfig(
-                drop_null_values=True,
-                date_format="%Y",
-                value_precision=2
-            )
-        )
-        transform_result = transformer.transform_data(
-            input_file=extract_result['metadata']['output_file']
-        )
+        transformed_wb = wb_transformer.transform_data(wb_data['metadata']['output_file'])
         
         # Load
-        loader = WorldBankLoader(
-            config=LoaderConfig(
-                db_url=db_config['db_url'],
-                schema_name=db_config['schema_name'],
-                batch_size=db_config['batch_size']
-            )
-        )
-        load_result = loader.load_data(
-            input_file=transform_result['metadata']['output_file']
-        )
+        wb_loader.load_data(transformed_wb['metadata']['output_file'])
         
-        # Compile pipeline results
-        pipeline_result = {
-            'extract_metrics': extract_result['metrics'],
-            'transform_metrics': transform_result['metadata'],
-            'load_metrics': load_result['metadata'],
-            'pipeline_status': 'success'
-        }
-        
-        logger.info("ETL pipeline completed successfully")
-        return pipeline_result
-        
-    except Exception as e:
-        logger.error(f"Pipeline failed: {str(e)}")
-        raise
+        results[indicator_name] = wb_data
+    
+    # Extract and load IMF data
+    imf_extractor = IMFExtractor()
+    imf_data = imf_extractor.extract_fsi_data(
+        country_code=country,
+        start_year=start_year,
+        end_year=end_year,
+        indicators=imf_indicators
+    )
+    
+    # Transform IMF data
+    transformed_imf = wb_transformer.transform_data(imf_data['metadata']['output_file'])
+    
+    # Load IMF data
+    wb_loader.load_data(transformed_imf['metadata']['output_file'])
+    
+    results['IMF_FSI'] = imf_data
+    
+    return results
+
+def create_analysis_visualization(db_config: Dict[str, Any], country: str):
+    """Create visualization of the combined economic data."""
+    engine = create_engine(db_config['db_url'])
+    
+    # Query combined data
+    query = """
+    SELECT 
+        wb_gdp.date,
+        wb_gdp.value as gdp_growth,
+        wb_unemp.value as unemployment_rate,
+        imf_fsi.regulatory_capital,
+        imf_fsi.nonperforming_loans,
+        imf_fsi.return_on_assets
+    FROM 
+        world_bank.economic_indicators wb_gdp
+    JOIN 
+        world_bank.economic_indicators wb_unemp 
+        ON wb_gdp.date = wb_unemp.date
+    JOIN 
+        imf.financial_soundness imf_fsi 
+        ON wb_gdp.date = imf_fsi.date
+    WHERE 
+        wb_gdp.indicator = 'NY.GDP.MKTP.KD.ZG'
+        AND wb_unemp.indicator = 'SL.UEM.TOTL.ZS'
+        AND wb_gdp.country = :country
+    ORDER BY 
+        wb_gdp.date
+    """
+    
+    df = pd.read_sql(query, engine, params={'country': country})
+    
+    # Create visualization
+    fig = px.line(df, x='date', y=['gdp_growth', 'unemployment_rate', 
+                                  'regulatory_capital', 'nonperforming_loans', 
+                                  'return_on_assets'],
+                  title=f'Economic Indicators for {country}')
+    
+    fig.update_layout(
+        xaxis_title="Year",
+        yaxis_title="Value",
+        legend_title="Indicators"
+    )
+    
+    return fig
 
 if __name__ == "__main__":
-    # Example usage
+    # Load environment variables
+    load_dotenv()
+    
+    # Database configuration
     db_config = {
-        'db_url': 'postgresql://user:password@localhost:5432/worldbank',
-        'schema_name': 'world_bank',
+        'db_url': os.getenv('DATABASE_URL'),
+        'schema_name': 'economic_data',
         'batch_size': 1000
     }
     
-    pipeline_result = run_etl_pipeline(
+    # Run pipeline for USA
+    results = run_combined_etl(
         country='USA',
-        indicator='NY.GDP.MKTP.CD',  # GDP indicator
-        start_year=2000,
+        start_year=2010,
         end_year=2023,
         db_config=db_config
     )
+    
+    # Create visualization
+    fig = create_analysis_visualization(db_config, 'USA')
+    fig.show()

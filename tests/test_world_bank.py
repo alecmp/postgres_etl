@@ -1,5 +1,5 @@
 import pytest
-from src.etl.extract import fetch_world_bank_data, get_config_path
+from src.etl.WorldBankExtractor import fetch_world_bank_data, get_config_path
 
 def test_world_bank_extraction():
     """Test successful data extraction from World Bank API."""

@@ -5,7 +5,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.append(str(project_root))
 
-from src.etl.extract import WorldBankExtractor
+from src.etl.WorldBankExtractor import WorldBankExtractor
 import argparse
 import logging
 
